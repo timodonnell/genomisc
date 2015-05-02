@@ -1,17 +1,8 @@
-import math
-from collections import Counter
 import logging
 
-from matplotlib import pyplot
+import numpy
 
-VARIANT_LABEL = "\n".join([
-    "#{variant_num}",
-    "{variant.locus.contig}:{variant.locus.position}",
-    "{gene_names}",
-    "{variant.ref}->{variant.alt}",
-    "{effect}",
-    "{extra}"
-])
+from matplotlib import pyplot
 
 PIE_CHART_COLORS = [
     'yellowgreen',
@@ -33,177 +24,145 @@ def abbreviate_allele(allele):
         return "%s+%d" % (allele[0], len(allele))
     return allele
 
+def text_args(user_args, **default_args):
+    if not isinstance(user_args, dict):
+        user_args = {"s": user_args}
+    default_args.update(user_args)
+    return default_args
+
 def plot(
-        variants,
-        sample_names,
-        evidence_function,
-        min_percent_to_show_allele=1.0,
-        max_alleles=6,
-        variants_per_figure=10,
-        sample_name_label_height=5.0,
-        variant_label_width=3.0,
-        cell_width=2.0,
-        cell_height=2.5,
-        sample_display_name_function=lambda name: name,
-        sample_name_text_extra_properties={},
-        variant_label_string=VARIANT_LABEL,
-        variant_label_extra_function=lambda variant: "",
-        variant_label_text_extra_properties={},
+        allele_vectors_matrix,
+        radii,
+        row_labels,
+        col_labels,
+        cell_labels,
+        rows_per_figure=10,
+        col_label_height=8.0,
+        row_label_width=3.5,
+        cell_width=2.5,
+        cell_height=3.5,
         pie_chart_colors=PIE_CHART_COLORS,
-        cell_label_extra_function=lambda variant, sample: "",
-        cell_label_text_extra_properties_function=lambda variant, sample: {},
-        radius_function=lambda total: math.pow(total / 1300., 1 / 3.0),
-        abbreviate_allele_function=abbreviate_allele,
         legend_extra_properties={},
         subplots_adjust_properties={'hspace': 0.1}):
+    """
 
-    sample_display_names = dict(
-        (name, sample_display_name_function(name))
-        for name in sample_names)
+    Parameters
+    ---
 
-    sample_name_text_properties = {
-        'rotation': 90,
-        'fontsize': 'x-large',
-    }
-    sample_name_text_properties.update(sample_name_text_extra_properties)
+    matrix_allele_dicts
+        List of DataFrame instances. Each dataframe has rows equal to
+        number of columns in the plot. The columns are the alleles.
 
-    variant_label_text_properties = {
-        'verticalalignment': "center",
-    }
-    variant_label_text_properties.update(variant_label_text_extra_properties)
+    radii
+        Num rows x num cols array
+
+    """
+
+    num_rows = len(radii)
+    num_cols = len(radii[0])
+
+    assert len(allele_vectors_matrix) == num_rows
+    assert len(row_labels) == num_rows
+    assert len(col_labels) == num_cols
 
     legend_properties = {
-        'bbox_to_anchor': (.15, .8),
+        'bbox_to_anchor': (-.5, .8),
         'fontsize': 'large',
         'loc': 'upper left',
+        'frameon': False,
     }
     legend_properties.update(legend_extra_properties)
-    
-    variants_queue = list(variants)
-    figures = []
-    while variants_queue:
-        logging.info("Creating figure %d" % (len(figures) + 1))
-        plot_variants = [
-            variants_queue.pop(0)
-            for _
-            in range(min(variants_per_figure, len(variants_queue)))
-        ]
+
+    figure_row_plans = []
+    current_figure_row_end = 0  # exclusive
+    while current_figure_row_end < num_rows:
+        current_figure_rows = min(
+            rows_per_figure, (num_rows - current_figure_row_end))
+        current_figure_row_start = current_figure_row_end
+        current_figure_row_end += current_figure_rows
+        figure_row_plans.append((
+            current_figure_rows,
+            current_figure_row_start,
+            current_figure_row_end))
+
+    for (figure_num, plan) in enumerate(figure_row_plans):
+        logging.info("Creating figure %d / %d" % (
+            figure_num + 1, len(figure_row_plans)))
+        (current_figure_rows,
+            current_figure_row_start,
+            current_figure_row_end) = plan
+   
         figure = pyplot.figure(
             figsize=(
-                variant_label_width + cell_width * len(sample_names),
-                sample_name_label_height + cell_height * len(plot_variants)))
-        figures.append(figure)
+                row_label_width + cell_width * num_cols,
+                col_label_height + cell_height * current_figure_rows))
 
-        label_height_ratio = sample_name_label_height / float(cell_height)
-        label_width_ratio = variant_label_width / float(cell_width)
+        label_height_ratio = col_label_height / float(cell_height)
+        label_width_ratio = row_label_width / float(cell_width)
         gridspec = pyplot.GridSpec(
-            len(plot_variants) + 1,
-            len(sample_names) + 1,
-            height_ratios=[label_height_ratio] + [1] * len(plot_variants),
-            width_ratios=[label_width_ratio] + [1] * len(sample_names))
+            current_figure_rows + 1,
+            num_cols + 1,
+            height_ratios=([label_height_ratio] +
+                [1] * current_figure_rows),
+            width_ratios=[label_width_ratio] + [1] * num_cols)
 
-        # The first row of each figure gives the sample names.
-        for (sample_i, sample) in enumerate(sample_names):
-            ax = pyplot.subplot(gridspec.new_subplotspec((0, sample_i + 1)))
+        # The first row of each figure gives the column labels.
+        for col_num in range(num_cols):
+            ax = pyplot.subplot(gridspec.new_subplotspec((0, col_num + 1)))
             ax.axis("off")
-            ax.text(
-                .5,
-                1,
-                sample_display_names[sample],
-                **sample_name_text_properties)
-
-        # Subsequent rows are the variants.
-        for (variant_num, variant) in enumerate(plot_variants):
-            # First column gives info about the variant.
-            variant_label = variant_label_string.format(
-                variant_num=variant_num,
-                variant=variant,
-                gene_names=" ".join(variant.varcode.gene_names()),
-                effect=variant.varcode.top_effect().short_description(),
-                extra=variant_label_extra_function(variant)).strip()
+            ax.text(**text_args(
+                col_labels[col_num],
+                x=0.5,
+                y=1.0,
+                rotation=90,
+                fontsize='x-large'))
             
-            ax_variant_labels = pyplot.subplot(
-                gridspec.new_subplotspec((variant_num + 1, 0)))
-            ax_variant_labels.text(
-                0.5,
-                .5,
-                variant_label,
-                transform=ax_variant_labels.transAxes,
-                **variant_label_text_properties)
-            ax_variant_labels.axis("off")
+        # Subsequent rows are the variants.
+        for row_num in range(current_figure_row_start, current_figure_row_end):
+            local_row_num = row_num - current_figure_row_start
 
-            # Collect the evidence.
-            # "Evidence" means an allele -> count Counter.
-            sample_to_evidence = dict(
-                (sample, Counter(evidence_function(sample, variant)))
-                for sample
-                in sample_names)
+            # First column gives row label.
+            ax_row_label = pyplot.subplot(
+                gridspec.new_subplotspec((local_row_num + 1, 0)))
+            ax_row_label.text(**text_args(
+                row_labels[row_num],
+                x=0.5,
+                y=0.5,
+                transform=ax_row_label.transAxes,
+                verticalalignment="center"))
+            ax_row_label.axis("off")
 
-            total_evidence = Counter()
-            alleles_with_sufficient_evidence = set()
-            for evidence in sample_to_evidence.values():
-                total_evidence += evidence
-                total = sum(count for (_, count) in evidence.most_common())
-                alleles_with_sufficient_evidence.update(
-                    allele for (allele, count)
-                    in evidence.most_common()
-                    if count * 100.0 / total >= min_percent_to_show_allele)
-
-            display_alleles = [variant.ref, variant.alt] + [
-                allele for (allele, _) in total_evidence.most_common()
-                if allele not in (variant.ref, variant.alt) and (
-                    allele in alleles_with_sufficient_evidence)
-            ][:max_alleles]
-
-            undisplayed_alleles = set(
-                allele for allele in total_evidence
-                if allele not in display_alleles)
-
-            if undisplayed_alleles:
-                undisplayed_alleles.add(display_alleles.pop(-1))
-                display_alleles.append(None)
-                for e in [total_evidence] + list(sample_to_evidence.values()):
-                    e[None] = sum(e[allele] for allele in undisplayed_alleles)
-
+            # List of (display name, [col1 count, col2 count, ...]) pairs.
+            allele_vectors = allele_vectors_matrix[row_num]
+            display_alleles = [allele for (allele, _) in allele_vectors]
+            col_to_counts_vector = numpy.array(
+                [vector for (_, vector) in allele_vectors]).T
             axis_with_a_pie_chart = None
-            for (sample_i, sample) in enumerate(sample_names):
+            for col_num in range(num_cols):
                 ax = pyplot.subplot(
-                    gridspec.new_subplotspec((variant_num + 1, sample_i + 1)))
+                    gridspec.new_subplotspec((local_row_num + 1, col_num + 1)))
                 ax.axis("off")
 
-                values = [
-                    sample_to_evidence[sample][allele]
-                    for allele in display_alleles
-                ]
-                values_label = "\n".join([
-                    " ".join(str(d) for d in values),
-                    "of %d" % sum(values),
-                    cell_label_extra_function(variant, sample)]).strip()
+                vector = col_to_counts_vector[col_num]
 
-                cell_label_font_properties = {
-                    'fontsize': 'large',
-                    'horizontalalignment': 'center',
-                }
-                cell_label_font_properties.update(
-                    cell_label_text_extra_properties_function(variant, sample))
-                ax.text(
-                    .5,
-                    0,
-                    values_label,
-                    transform=ax.transAxes,
-                    **cell_label_font_properties)
-
-                radius = radius_function(sum(values))
+                radius = radii[row_num][col_num]
                 if radius > 0:
-                    ax.pie(values, radius=radius, colors=pie_chart_colors)
+                    ax.pie(vector, radius=radius, colors=pie_chart_colors)
                     axis_with_a_pie_chart = ax
+
+                ax.text(**text_args(
+                    cell_labels[row_num][col_num],
+                    x=0.5,
+                    y=-0.2,
+                    transform=ax.transAxes,
+                    fontsize="large",
+                    horizontalalignment="center"))
 
             if axis_with_a_pie_chart:
                 axis_with_a_pie_chart.legend(
-                    [abbreviate_allele(allele) for allele in display_alleles],
-                    bbox_transform=ax_variant_labels.transAxes,
+                    display_alleles,
+                    bbox_transform=ax_row_label.transAxes,
                     **legend_properties)
 
         pyplot.subplots_adjust(**subplots_adjust_properties)
-
-    return figures
+        yield figure

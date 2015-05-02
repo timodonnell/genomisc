@@ -11,7 +11,7 @@ def configure_matplotlib(force_agg=False, interactive=False):
 
 
 def write_figures(filename, figures):
-    out_extension = filename.out.split('.')[-1]
+    out_extension = filename.split('.')[-1]
     if out_extension == 'pdf':
         if not figures:
             raise ValueError("No figures to write.")
