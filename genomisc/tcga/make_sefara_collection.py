@@ -110,6 +110,8 @@ def run():
         filename = os.path.basename(path)
         fields = fields_from_filename(filename)
 
+        # Add a few more fields.
+        fields["tags"] = ["bam"]
         fields['uuid'] = os.path.basename(os.path.dirname(path))
 
         fields[args.path_field_name] = (
