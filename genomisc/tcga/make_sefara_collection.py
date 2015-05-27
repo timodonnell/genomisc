@@ -22,8 +22,8 @@ except ImportError:
 parser = argparse.ArgumentParser()
 parser.add_argument("dir")
 parser.add_argument("--out")
-parser.add_argument("--path-drop")
-parser.add_argument("--field-name")
+parser.add_argument("--path-relative", default="/")
+parser.add_argument("--field-name", default="path")
 parser.add_argument("--format", choices=("python", "json"))
 
 filename_pattern = re.compile(
@@ -111,6 +111,8 @@ def run():
         fields = fields_from_filename(filename)
 
         fields['uuid'] = os.path.basename(os.path.dirname(path))
+
+        fields[args.field_name] = os.path.relpath(path, args.path_relative)
 
         resource = sefara.Resource(**fields)
         resources.append(resource)
