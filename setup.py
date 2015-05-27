@@ -41,13 +41,18 @@ if __name__ == '__main__':
     setup(
         name='genomisc',
         version="0.0.1",
-        description="Collection of plotting scripts for DNA sequencing data.",
+        description="Collection of scripts for DNA/RNA-seq analysis",
         author="Tim O'Donnell",
         author_email="tim {dot} odonnell {at} mssm {dot} edu",
         url="https://github.com/timodonnell/genomisc",
         license="http://www.apache.org/licenses/LICENSE-2.0.html",
         entry_points={
+            'console_scripts': [
+                'genomisc-tcga-make-sefara-collection = '
+                    'genomisc.tcga.make_sefara_collection:run',
+            ]
         },
+        package_data={'genomisc': ['data/tcga-code-tables/*.csv']},
         classifiers=[
             'Development Status :: 3 - Alpha',
             'Environment :: Console',
@@ -60,7 +65,10 @@ if __name__ == '__main__':
         install_requires=[
             "typechecks>=0.0.2",
             "matplotlib>=1.4.3",
+            "scipy>=0.15.1",
+            "pandas>=0.16.1",
+            "lxml>=3.4.4",
         ],
         long_description=readme,
-        packages=['genomisc'],
+        packages=['genomisc'],            
     )
