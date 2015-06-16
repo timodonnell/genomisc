@@ -1,7 +1,17 @@
 '''
 Given a directory of TCGA datasets, make a sefara collection.
 
+Reads from the file specfied by the -i flag (or stdin if not specified) a list
+of paths to TCGA BAM files. Writes out to stdout or the file specified in
+--out.
+
+Example:
+
+ssh demeter ls /demeter/scratch/datasets/tcga/*/TCGA-*.bam | \
+    genomisc-tcga-make-sefara-collection --path-field-name demeter_nfs_path
+
 '''
+from __future__ import print_function
 
 import argparse
 import glob
@@ -9,6 +19,7 @@ import os
 import pkgutil
 import re
 import collections
+import sys
 
 import pandas
 
@@ -19,12 +30,19 @@ try:
 except ImportError:
     from io import StringIO  # py 3
 
+
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("dir")
-parser.add_argument("--out")
-parser.add_argument("--path-relative", default="/")
-parser.add_argument("--path-field-name", default="path")
+parser.add_argument("--out",
+    help="File to write. Default: stdout")
+parser.add_argument("--path-field-name", default="path",
+    help="Field name to use for paths.")
+parser.add_argument('-i', '--input', type=argparse.FileType('r'), default='-')
 parser.add_argument("--format", choices=("python", "json"))
+parser.add_argument("--path-relative", default="/",
+    help="Convert paths to be relative to the given path (i.e. remove this "
+    "prefix from the paths)")
+parser.add_argument("--path-prepend", default="/",
+    help="Prepend the given string to the paths.")
 
 filename_pattern = re.compile(
     r'((((TCGA)-(\w{2})-(\w{4})-(\w{2})(\w)-(\w{2})(\w)-(\w{4})-(\w{2}))_?([\w-]*)?)\.bam)')
@@ -102,23 +120,41 @@ def fields_from_filename(filename):
     
 def run():
     args = parser.parse_args()
-    paths = glob.glob(os.path.join(args.dir, "*/TCGA-*.bam"))
-    print("Found %d BAM files." % len(paths))
+    paths = [
+        x.strip() for x in args.input.readlines() if x.strip().endswith(".bam")
+    ]
+    print("Found %d BAM files." % len(paths), file=sys.stderr)
 
     resources = []
     for path in paths:
         filename = os.path.basename(path)
         fields = fields_from_filename(filename)
-
-        # Add a few more fields.
         fields["name"] = "bam_%s" % fields["name"]
-        fields["tags"] = ["bam"]
-        fields['uuid'] = os.path.basename(os.path.dirname(path))
-
-        fields[args.path_field_name] = (
-            os.path.relpath(path, args.path_relative))
 
         resource = sefara.Resource(**fields)
+
+        # Add some conveniences
+        resource[args.path_field_name] = (
+            args.path_prepend + os.path.relpath(path, args.path_relative))
+        resource.uuid = os.path.basename(os.path.dirname(path))
+        
+        # Tags
+        resource.tags.add("bam")
+        if resource.platform:
+            resource.tags.add(resource.platform)
+        if resource.participant:
+            resource.tags.add("participant_%s" % resource.participant)
+        
+        if "mirna" in resource.extra.lower():
+            resource.tags.add("mirna")
+        else:
+            for analyte in ("rna", "dna"):
+                if analyte in resource.analyte.lower():
+                    resource.tags.add(analyte)
+        for sample in ("tumor", "normal"):
+            if sample in resource.sample.lower():
+                resource.tags.add(sample)
+
         resources.append(resource)
 
     rc = sefara.ResourceCollection(resources)
