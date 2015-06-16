@@ -19,7 +19,7 @@ try:
 except ImportError:
     from io import StringIO  # py 3
 
-parser = argparse.ArgumentParser()
+parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("dir")
 parser.add_argument("--out")
 parser.add_argument("--path-relative", default="/")
@@ -111,6 +111,7 @@ def run():
         fields = fields_from_filename(filename)
 
         # Add a few more fields.
+        fields["name"] = "bam_%s" % fields["name"]
         fields["tags"] = ["bam"]
         fields['uuid'] = os.path.basename(os.path.dirname(path))
 
